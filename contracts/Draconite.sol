@@ -3,6 +3,47 @@
 pragma solidity >=0.6.8;
 pragma experimental ABIEncoderV2;
 
+/*
+          \   Draconite Token   /
+           \(______ DCN ______)/
+           /`.----.\   /.----.`\
+          } /      :} {:      \ {
+         / {        } {        } \
+         } }      ) } { (      { {
+        / {      /|\}!{/|\      } \
+        } }     ( (."^".) )     { {
+       / {       (@\   /@)       } \
+       } }       |\~   ~/|       { {
+      / /        | )   ( |        \ \
+     { {        _)(,   ,)(_        } }
+      } }      //  `";"`  \\      { {
+     / /      //     (     \\      \ \
+    { {      {(     -=)     )}      } }
+     \ \     /)    -=(=-     (\    / /
+      `\\  /'/    /-=|\-\    \`\  //'
+        `\{  |   ( -===- )   |  }/'
+          `  _\   \-===-/   /_  '
+      jgs   (_(_(_)'-=-'(_)_)_)
+            `"`"`"       "`"`"`
+    
+    Draconite Token is a community driven DeFi project built on Binance Smart Chain #BSC,
+    with the most revolutionary mechanism for its holders and to the BSC ecosystem:
+        1. Earning claimable BNB just by holding $DCN Tokens. 
+            Collected 4% from each transaction.
+        2. Earning chance to be one of 3 winners of a Prize pool in BUSD each week. 
+            Collected 1% from each transaction.
+        3. Earning tokens from each sell or wallet to wallet transaction as a reflection. 
+            Collected 2% from sell and wallet to walllet transaction.
+        4. Stable token price by liquidity creation on each transaction.
+            Collected 2% on buy and 4% on sell and wallet to wallet transactions.
+    
+    Special thanks to:
+        1. Safemoon for popularizing reflection type of transactions through ERC-20/BEP-20 smart contracts!
+        2. Percybolmer in github and his version of Staking contract: https://github.com/percybolmer, which we modified for our needs!
+        3. And all BEP-20 and ERC-20 tokens that are designed to give back to their holders by multiple types of rewards!
+        4. ASCII picture art by jgs!
+*/
+
 import "ERC20.sol";
 import "IERC20.sol";
 import "SafeMath.sol";
@@ -30,7 +71,6 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     
     mapping(address => uint256) private _rOwned;
     mapping(address => uint256) private _tOwned;
-    
     mapping(address => mapping(address => uint256)) private _allowances;
     
     uint256 public _maxTxAmount = _tTotal; 
@@ -43,42 +83,39 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     mapping(address => uint256) public _userReinvested;
     uint256 public _totalReinvested = 0;
     
-    //Draconite wallets.
+    //Addresses.
     address public _marketingAddress = 0xF123b7c24d122B2Bba509F399e611BA2A3086A8f;
-    address public _charityAddress = 0x243685ae6bA5eC3F12e71d5923BeA5fA95bf53BF;
-    
     address public immutable BUSD = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56);
     
     //Tx fees in %.
-    uint256 private _liquidityFee = 5;
-    uint256 private _redistributionFee = 5;
-    uint256 private _bnbRewardFee = 5;
-    uint256 private _prizePoolFee = 2;
-    uint256 private _marketingFee = 2;
-    uint256 private _charityFee = 1;
+    uint256 private _liquidityFee = 4;
+    uint256 private _redistributionFee = 2;
+    uint256 private _bnbRewardFee = 4;
+    uint256 private _prizePoolFee = 1;
+    uint256 private _marketingFee = 3;
     
     uint256 private _previousLiquidityFee;
     uint256 private _previousRedistributionFee;
     uint256 private _previousRewardFee;
     uint256 private _previousPricePoolFee;
     uint256 private _previousMarketingFee;
-    uint256 private _previousCharityFee;
     
-    //Fee for charity when account redeem reward in BNB.
-    uint256 public _rewardPrizePoolFee = 10; //%
+    //Fee for marketing when account redeem reward in BNB.
+    uint256 public _marketingOnWhaleClaimFee = 10; //%
     uint256 public _rewardBNBThreshHold = 1 ether;
+    
+    //Prize pool utility.
+    uint256 private _unlockPrizePoolDate;
+    uint256 private _unlockPrizePoolCycle = 1 weeks;
     
     //Indicator if a tx is a buy tx.
     bool private _buyTx = false;
-    
-    uint256 private unlockPrizePoolDate;
-    uint256 private unlockPrizePoolCycle = 12 weeks;
     
     //Store tokens from each buy tx.
     uint256 private _tTokensFromBuyTxs;
     
     //Total reflected fee.
-    uint256 private _tFeeTotal;
+    uint256 private _tReflectedFeeTotal;
     
     //Total reward hard cap from the bnb pool size measured in %.
     uint256 public _rewardHardCap = 10; 
@@ -86,16 +123,16 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     //Reward availability.
     uint256 public _rewardCycleBlock = 1 weeks;
     mapping(address => uint256) public _nextAvailableClaimDate;
-
+    
+    //Minimum tokens that the contract should have as utility.
     uint256 public _minTokenNumberUpperLimit = _tTotal.mul(2).div(100).div(10); 
     
+    //Excluded addresses from fees, rewards and maxTx.
     mapping(address => bool) private _isExcludedFromFee;
-    mapping(address => bool) private _isExcluded;
+    mapping(address => bool) private _isExcludedFromReward;
     mapping(address => bool) private _isExcludedFromMaxTx;
 
     address[] private _excluded;
-    
-    bool private inPresale = false;
     
     //Swap bool and modifier.
     bool public _swapAndLiquifyEnabled = false; //Should be true in order to add liquidity.
@@ -126,12 +163,11 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     event ChangeMaxTxAmount(uint256 txAmount);
     event AddressExcludedFromMaxTxAmount(address account);
     event ChangeMarketingAddress(address account);
-    event ChangeCharityAddress(address account);
     event ChangeRewardCycleBlock(uint256 rewardCycleBlock);
     event ChangeRewardHardCap(uint256 rewardHardCap);
     event PrizePoolSentToWinners(address firstwinner, address secondWinner, address thirdWinner, 
-        uint256 firstPrize, uint256 secondPrize, uint256 thirdPrize, uint256 unlockPrizePoolDate);
-
+        uint256 firstPrize, uint256 secondPrize, uint256 thirdPrize, uint256 _unlockPrizePoolDate);
+    
     constructor () {
         _rOwned[_msgSender()] = _rTotal;
 
@@ -143,12 +179,10 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
         _isExcludedFromFee[_marketingAddress] = true;
-        _isExcludedFromFee[_charityAddress] = true;
 
         _isExcludedFromMaxTx[owner()] = true;
         _isExcludedFromMaxTx[address(this)] = true;
         _isExcludedFromMaxTx[_marketingAddress] = true;
-        _isExcludedFromMaxTx[_charityAddress] = true;
         _isExcludedFromMaxTx[address(0)] = true;
        
         emit Transfer(address(0), _msgSender(), _tTotal);
@@ -174,12 +208,11 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     }
     
     function circulatingSupply() public view returns (uint256) {
-        return uint256(_tTotal)
-        .sub(balanceOf(address(0)));
+        return uint256(_tTotal).sub(balanceOf(address(0)));
     }
 
     function balanceOf(address account) public view override returns (uint256) {
-        if (_isExcluded[account]) return _tOwned[account];
+        if (_isExcludedFromReward[account]) return _tOwned[account];
         return tokenFromReflection(_rOwned[account]);
     }
 
@@ -214,11 +247,11 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     }
 
     function isExcludedFromReward(address account) public view returns (bool) {
-        return _isExcluded[account];
+        return _isExcludedFromReward[account];
     }
 
-    function totalFees() public view returns (uint256) {
-        return _tFeeTotal;
+    function totalReflectedFees() public view returns (uint256) {
+        return _tReflectedFeeTotal;
     }
 
     function isExcludedFromFee(address account) public view returns (bool) {
@@ -227,13 +260,13 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
 
     function deliver(uint256 tAmount) public {
         address sender = _msgSender();
-        require(!_isExcluded[sender], "Excluded addresses cannot call this function");
+        require(!_isExcludedFromReward[sender], "Excluded addresses cannot call this function");
         
         (,,,uint256 rAmount,,) = _getValues(tAmount);
         
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rTotal = _rTotal.sub(rAmount);
-        _tFeeTotal = _tFeeTotal.add(tAmount);
+        _tReflectedFeeTotal = _tReflectedFeeTotal.add(tAmount);
     }
 
     function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns (uint256) {
@@ -262,7 +295,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         uint256 bnbReward = calculateReward(ofAddress, circulatingSupply(), bnbPool, getRewardCycleBlock());
         
         if (bnbReward > bnbPool.mul(_rewardHardCap).div(100))
-            bnbReward = bnbPool.div(10);
+            bnbReward = bnbPool.div(_rewardHardCap);
             
         return bnbReward;
     }
@@ -281,7 +314,6 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         _nextAvailableClaimDate[msg.sender] = timestamp + getRewardCycleBlock();
         
         if (rewardReinvest > 0) {
-            //expectedtoken = Utils.getAmountsOut(rewardReinvest, address(_pancakeRouter)); 
             expectedtoken = balanceOf(msg.sender);
             
             Utils.swapBnbForTokens(address(_pancakeRouter), address(this), msg.sender, rewardReinvest);
@@ -295,14 +327,14 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         }
         
         if (rewardBNB > 0) { 
-            //Collect 10% tax for price pool from each collected reward if more than threshhold
+            //Collect 10% tax for marketing from each collected reward if the claim is more than the threshhold.
             if (rewardBNB > _rewardBNBThreshHold){
-                uint256 rewardPricePoolFee = rewardBNB.mul(_rewardPrizePoolFee).div(100);
+                uint256 marketingOnWhaleClaimFee = rewardBNB.mul(_marketingOnWhaleClaimFee).div(100);
                 
-                (bool success, ) = address(_marketingAddress).call{ value: rewardPricePoolFee }("");
+                (bool success, ) = address(_marketingAddress).call{ value: marketingOnWhaleClaimFee }("");
                 require(success, " Error: Cannot send reward");
                 
-                rewardBNB = rewardBNB.sub(rewardPricePoolFee);
+                rewardBNB = rewardBNB.sub(marketingOnWhaleClaimFee);
             }
             
             (bool sent,) = address(msg.sender).call{value : rewardBNB}("");
@@ -322,51 +354,16 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         Functions that can be used by the owner of the contract.
     */
     function activateContract() public onlyOwner {
-        prepareLaunch();
-        
         //Protocol
         setMaxTxPercent(10000);
         setSwapAndLiquifyEnabled(true);
-        unlockPrizePoolDate = block.timestamp.add(12 weeks);
+        _unlockPrizePoolDate = block.timestamp.add(_unlockPrizePoolCycle);
         
-        //Exclude Owner and Pair addresses from rewards
+        //Exclude Owner addresses from rewards
         excludeFromReward(address(0x652ccCdfaE41bfe346bA1C00a1CebD7b262AafF0));
-        excludeFromReward(address(_pancakeRouter));
         
         //Approve contract
         _approve(address(this), address(_pancakeRouter), 2 ** 256 - 1);
-    }
-    
-    function preparePresale() public onlyOwner {
-        require (inPresale == false, "Presale is already activated!");
-        
-        if (_redistributionFee == 0 && _liquidityFee == 0 &&
-            _prizePoolFee == 0 && _marketingFee == 0 &&
-            _charityFee == 0) return;
-
-        _previousLiquidityFee = _liquidityFee;
-        _previousRedistributionFee = _redistributionFee;
-        _previousPricePoolFee = _prizePoolFee;
-        _previousMarketingFee = _marketingFee;
-        _previousCharityFee = _charityFee;
-      
-        _liquidityFee = 0;
-        _redistributionFee = 0;
-        _prizePoolFee = 0;
-        _marketingFee = 0;
-        _charityFee = 0;
-        
-        inPresale = true;
-    }
-    
-    function prepareLaunch() private {
-        if (inPresale == true){
-            _redistributionFee = _previousRedistributionFee;
-            _liquidityFee = _previousLiquidityFee;
-            _prizePoolFee = _previousPricePoolFee;
-            _marketingFee = _previousMarketingFee;
-            _charityFee = _previousCharityFee;
-        }
     }
 
     function changePancakeRouter(address newRouter) public onlyOwner {
@@ -380,23 +377,23 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     }
 
     function excludeFromReward(address account) public onlyOwner {
-        require(!_isExcluded[account], "Account is already excluded");
+        require(!_isExcludedFromReward[account], "Account is already excluded");
         if (_rOwned[account] > 0) {
             _tOwned[account] = tokenFromReflection(_rOwned[account]);
         }
-        _isExcluded[account] = true;
+        _isExcludedFromReward[account] = true;
         _excluded.push(account);
         
         emit ExcludeAddressFromRewards(account);
     }
 
     function includeInReward(address account) external onlyOwner {
-        require(_isExcluded[account], "Account is not excluded");
+        require(_isExcludedFromReward[account], "Account is not excluded");
         for (uint256 i = 0; i < _excluded.length; i++) {
             if (_excluded[i] == account) {
                 _excluded[i] = _excluded[_excluded.length - 1];
                 _tOwned[account] = 0;
-                _isExcluded[account] = false;
+                _isExcludedFromReward[account] = false;
                 _excluded.pop();
                 break;
             }
@@ -440,12 +437,6 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         
         emit ChangeMarketingAddress(_marketingAddress);
     }
-    
-    function changeCharityAddress(address payable newAddress) public onlyOwner {
-        _charityAddress = newAddress;
-        
-        emit ChangeCharityAddress(_charityAddress);
-    }
 
     function changeRewardCycleBlock(uint256 newcycle) public onlyOwner {
         _rewardCycleBlock = newcycle;
@@ -453,6 +444,9 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         emit ChangeRewardCycleBlock(_rewardCycleBlock);
     }
     
+    /*
+        In case of future migration, we are KYCed, this is not a scam, it is a utility function.
+    */
     function migrateToken(address newAddress, uint256 amount) public onlyOwner {
         removeAllFee();
         
@@ -463,7 +457,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
 
     function migrateBnb(address payable newAddress, uint256 amount) public onlyOwner {
         (bool success, ) = address(newAddress).call{ value: amount }("");
-        require(success, "Address: unable to send value, charity may have reverted");    
+        require(success, "Address: unable to send value, tx may have reverted");    
     }
     
     function migrateBusd(address payable newAddress, uint256 amount) public onlyOwner {
@@ -480,50 +474,73 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     
     function useTokensFromBuyTx() public onlyOwner {
         require(_tTokensFromBuyTxs > 0, "Not enough stashed tokens.");
-        uint256 multiplier = 100;
         
-        //Raw fee
-        uint256 bnbRewardFee = _bnbRewardFee;
-        uint256 prizePoolFee = _prizePoolFee;
-        uint256 charityFee = _charityFee;
+        //Calculate prec.
+        uint256 tokensForLiquidity = _tTokensFromBuyTxs.div(5); //20%
+        _tTokensFromBuyTxs = _tTokensFromBuyTxs.sub(tokensForLiquidity);
+        uint256 tokensForBnbReward = _tTokensFromBuyTxs.div(2); //40%
+        _tTokensFromBuyTxs = _tTokensFromBuyTxs.sub(tokensForBnbReward);
+        uint256 tokensForPrizePool = _tTokensFromBuyTxs.div(4); //10%
+        _tTokensFromBuyTxs = _tTokensFromBuyTxs.sub(tokensForPrizePool);
+        uint256 tokensForMarketing = _tTokensFromBuyTxs; //30%
         
-        //Total raw fees
-        uint256 totalTxFees = bnbRewardFee.add(prizePoolFee).add(charityFee);
-        
-        uint256 totalTokensFromTxFees = _tTokensFromBuyTxs;
-        
-        uint256 percTokensForPrizePool = prizePoolFee.mul(multiplier).div(totalTxFees);
-        uint256 percTokensForCharity = charityFee.mul(multiplier).div(totalTxFees);
+        uint256 tokensForLiquidityToBeSwapped = tokensForLiquidity.div(2); //10%
+        uint256 tokensToBeSwapped = tokensForLiquidityToBeSwapped;
         
         uint256 initialBalance = address(this).balance;
-
-        Utils.swapTokensForBnb(address(_pancakeRouter), totalTokensFromTxFees);
-        
+        //Swap tokens for bnb.
+        Utils.swapTokensForBnb(address(_pancakeRouter), tokensToBeSwapped);
         uint256 swappedBnb = address(this).balance.sub(initialBalance);
         
-        //Send fees in busd to the correct addresses
-        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), address(this), swappedBnb.mul(percTokensForPrizePool).div(100));
-        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), _charityAddress, swappedBnb.mul(percTokensForCharity).div(100));
+        //Аdd liquidity to pancake.
+        Utils.addLiquidity(address(_pancakeRouter), tokensForLiquidityToBeSwapped, swappedBnb);
         
+        emit SwapAndLiquify(
+            tokensForLiquidityToBeSwapped, 
+            swappedBnb, 
+            tokensForLiquidityToBeSwapped
+        );
+        
+        //Add to BNB Reward pool, send BUSD to Prize Pool and Marketing wallet.
+        tokensToBeSwapped = tokensForBnbReward.add(tokensForPrizePool).add(tokensForMarketing); 
+        
+        initialBalance = address(this).balance;
+        Utils.swapTokensForBnb(address(_pancakeRouter), tokensToBeSwapped);
+        swappedBnb = address(this).balance.sub(initialBalance);
+        
+        uint256 bnbToBeAddedAsBusd = swappedBnb.div(2);
+        
+        //Leftover amount of bnb stays in the contract as BNB Rewards
+        swappedBnb = swappedBnb.sub(bnbToBeAddedAsBusd);
+        
+        //Send fees in busd to marketing and charity addresses
+        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), address(this), bnbToBeAddedAsBusd.div(4));
+        bnbToBeAddedAsBusd = bnbToBeAddedAsBusd - bnbToBeAddedAsBusd.div(4);
+        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), _marketingAddress, bnbToBeAddedAsBusd);
+        
+        emit SwapTokenForRewards(swappedBnb);
+        
+        //Reset _tTokensFromBuyTxs.
         _tTokensFromBuyTxs = 0;
     }
     
     function sendPrizePool(address payable firstwinner, address payable secondWinner, address payable thirdWinner) public onlyOwner {
-        require(block.timestamp >= unlockPrizePoolDate);
+        require(block.timestamp >= _unlockPrizePoolDate);
         
         uint256 BUSDBalance = IERC20(BUSD).balanceOf(address(this));
         
         uint256 firstPrize = BUSDBalance.div(2);
-        uint256 secondPrize = BUSDBalance.div(4);
-        uint256 thirdPrize = BUSDBalance.div(4);
+        BUSDBalance = BUSDBalance - firstPrize;
+        uint256 secondPrize = BUSDBalance.div(2);
+        uint256 thirdPrize = BUSDBalance.div(2);
         
         IERC20(BUSD).transfer(firstwinner, firstPrize);
         IERC20(BUSD).transfer(secondWinner, secondPrize);
         IERC20(BUSD).transfer(thirdWinner, thirdPrize);
         
-        unlockPrizePoolDate = block.timestamp.add(unlockPrizePoolCycle);
+        _unlockPrizePoolDate = block.timestamp.add(_unlockPrizePoolCycle);
         
-        emit PrizePoolSentToWinners(firstwinner, secondWinner, thirdWinner, firstPrize, secondPrize, thirdPrize, unlockPrizePoolDate);
+        emit PrizePoolSentToWinners(firstwinner, secondWinner, thirdWinner, firstPrize, secondPrize, thirdPrize, _unlockPrizePoolDate);
     }
 
     /*
@@ -546,7 +563,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         uint256 rSumFee = tSumFee.mul(currentRate);
         
         _rOwned[address(this)] = _rOwned[address(this)].add(rSumFee);
-        if (_isExcluded[address(this)])
+        if (_isExcludedFromReward[address(this)])
             _tOwned[address(this)] = _tOwned[address(this)].add(tSumFee);
     }
 
@@ -579,43 +596,33 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
             10 ** 2
         );
     }
-
-    function calculateCharityFee(uint256 _amount) private view returns (uint256) {
-        return _amount.mul(_charityFee).div(
-            10 ** 2
-        );
-    }
     
     function prepareBuyTx() private {
-        if (_redistributionFee == 0 && _liquidityFee == 0 &&_marketingFee == 0) {
+        if (_redistributionFee == 0 && _liquidityFee == 2) {
             return;
         }
         
         _previousLiquidityFee = _liquidityFee;
         _previousRedistributionFee = _redistributionFee;
-        _previousMarketingFee = _marketingFee;
       
-        _liquidityFee = 0;
+        _liquidityFee = 2;
         _redistributionFee = 0;
-        _marketingFee = 0;
     }
     
     function afterBuyTx() private {
-        _redistributionFee = _previousRedistributionFee;
         _liquidityFee = _previousLiquidityFee;
-        _marketingFee = _previousMarketingFee;
+        _redistributionFee = _previousRedistributionFee;
     }
     
     function removeAllFee() private {
         if (_redistributionFee == 0 && _liquidityFee == 0 &&
             _prizePoolFee == 0 && _marketingFee == 0 &&
-            _charityFee == 0 && _bnbRewardFee == 0) return;
+            _bnbRewardFee == 0) return;
 
         _previousLiquidityFee = _liquidityFee;
         _previousRedistributionFee = _redistributionFee;
         _previousPricePoolFee = _prizePoolFee;
         _previousMarketingFee = _marketingFee;
-        _previousCharityFee = _charityFee;
         _previousRewardFee = _bnbRewardFee;
       
         _liquidityFee = 0;
@@ -623,7 +630,6 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         _bnbRewardFee = 0;
         _prizePoolFee = 0;
         _marketingFee = 0;
-        _charityFee = 0;
     }
 
     function restoreAllFee() private {
@@ -631,7 +637,6 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         _liquidityFee = _previousLiquidityFee;
         _prizePoolFee = _previousPricePoolFee;
         _marketingFee = _previousMarketingFee;
-        _charityFee = _previousCharityFee;
         _bnbRewardFee = _previousRewardFee;
     }
     
@@ -650,8 +655,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     function _getTValues(uint256 tAmount) private view returns (uint256, uint256, uint256) {
         uint256 tFee = calculateRedistributionFee(tAmount);
         uint256 tSumFee = calculateLiquidityFee(tAmount).add(calculatePrizePoolFee(tAmount))
-            .add(calculateMarketingFee(tAmount)).add(calculateCharityFee(tAmount))
-            .add(calculateBnbRewardFee(tAmount));
+            .add(calculateMarketingFee(tAmount)).add(calculateBnbRewardFee(tAmount));
         uint256 tTransferAmount = tAmount.sub(tFee).sub(tSumFee);
         
         return (tTransferAmount, tFee, tSumFee);
@@ -668,7 +672,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
     
     function _reflectFee(uint256 rFee, uint256 tFee) private {
         _rTotal = _rTotal.sub(rFee);
-        _tFeeTotal = _tFeeTotal.add(tFee);
+        _tReflectedFeeTotal = _tReflectedFeeTotal.add(tFee);
     }
 
     function _approve(address owner, address spender, uint256 amount) private {
@@ -707,6 +711,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
             contractTokenBalance = _maxTxAmount;
         }
         
+        //Check if the transaction is buy tx.
         if (from != address(_pancakePair)){
             if (
                 !_inSwapAndLiquify &&
@@ -717,8 +722,9 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
                 !(from == address(this)) && 
                 amount > 0
             ) {
+                //Swap tokens for bnb and fund liquidity, bnbs prize pool, busd prize pool and marketing.
                 swapAndLiquify(calculateLiquidityFee(amount), calculateBnbRewardFee(amount),
-                    calculatePrizePoolFee(amount), calculateMarketingFee(amount), calculateCharityFee(amount));
+                    calculatePrizePoolFee(amount), calculateMarketingFee(amount));
             }
             _buyTx = false;
         } else {
@@ -727,74 +733,83 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
 
         bool takeFee = true;
 
-        //If any account belongs to _isExcludedFromFee account or reflections are disabled then remove the fee 
+        //If any account belongs to _isExcludedFromFee account then remove the fees.
         if (_isExcludedFromFee[from] || _isExcludedFromFee[to]) {
             takeFee = false;
         }
         
-        //Make the transfer
+        //Make the transfer.
         _tokenTransfer(from, to, amount, takeFee);
     }
     
     function swapAndLiquify(uint256 tokensAmountForLiquidity, uint256 tokensAmountToBeSwappedForUserRewards,
-        uint256 tokenAmountForPricePool, uint256 tokenAmountForMarketing, uint256 tokenAmountForCharity) private {
+        uint256 tokenAmountForPricePool, uint256 tokenAmountForMarketing) private {
 
-        //Add liquidity
         uint256 tokensAmountForLiquidityToBeSwapped = tokensAmountForLiquidity.div(2);
         uint256 tokensAmountToBeSwapped = tokensAmountForLiquidityToBeSwapped.add(tokensAmountToBeSwappedForUserRewards)
-            .add(tokenAmountForPricePool).add(tokenAmountForMarketing).add(tokenAmountForCharity);
+            .add(tokenAmountForPricePool).add(tokenAmountForMarketing);
             
         uint256 initialBalance = address(this).balance;
-
+        
+        //Swap tokens for BNB.
         Utils.swapTokensForBnb(address(_pancakeRouter), tokensAmountToBeSwapped);
         
         uint256 swappedBnb = address(this).balance.sub(initialBalance);
         
         uint256 bnbToBeAddedToLiquidity = swappedBnb.div(5);
         
-        swappedBnb = swappedBnb.sub(bnbToBeAddedToLiquidity);
-        
-        //Аdd liquidity to pancake
+        //Аdd liquidity to pancake.
         Utils.addLiquidity(address(_pancakeRouter), tokensAmountForLiquidityToBeSwapped, bnbToBeAddedToLiquidity);
         
         emit SwapAndLiquify(
             tokensAmountForLiquidityToBeSwapped, 
-            swappedBnb, 
+            bnbToBeAddedToLiquidity, 
             tokensAmountForLiquidityToBeSwapped
         );
         
-        //Send fees in busd to the correct addresses
-        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), _marketingAddress, swappedBnb.div(5));
-        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), _charityAddress, swappedBnb.div(10));
-        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), address(this), swappedBnb.div(5));
+        swappedBnb = swappedBnb.sub(bnbToBeAddedToLiquidity);
+        
+        uint256 bnbToBeAddedAsBusd = swappedBnb.div(2);
+        
+        //Leftover amount of bnb stays in the contract as BNB Rewards.
+        swappedBnb = swappedBnb.sub(bnbToBeAddedAsBusd);
+        
+        //Send fees in busd to prize pool and marketing addresses.
+        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), address(this), bnbToBeAddedAsBusd.div(4));
+        bnbToBeAddedAsBusd = bnbToBeAddedAsBusd - bnbToBeAddedAsBusd.div(4);
+        Utils.swapBnbForTokens(address(_pancakeRouter), address(BUSD), _marketingAddress, bnbToBeAddedAsBusd);
         
         emit SwapTokenForRewards(swappedBnb);
     }
     
-    //To receive BNB from pancakeRouter when swapping
+    //To receive BNB from pancakeRouter when swapping.
     receive() external payable {}
 
     function _tokenTransfer(address sender, address recipient, uint256 amount, bool takeFee) private {
+        //Prepare fees for the type of transaction.
         if (!takeFee) {
             removeAllFee();
         } else if (_buyTx) {
             prepareBuyTx();
         }
         
-        if (_isExcluded[sender] && !_isExcluded[recipient]) {
+        //Check what type of transaction to make.
+        if (_isExcludedFromReward[sender] && !_isExcludedFromReward[recipient]) {
             _transferFromExcluded(sender, recipient, amount);
-        } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
+        } else if (!_isExcludedFromReward[sender] && _isExcludedFromReward[recipient]) {
             _transferToExcluded(sender, recipient, amount);
-        } else if (_isExcluded[sender] && _isExcluded[recipient]) {
+        } else if (_isExcludedFromReward[sender] && _isExcludedFromReward[recipient]) {
             _transferBothExcluded(sender, recipient, amount);
         } else {
             _transferStandard(sender, recipient, amount);
         }
         
+        //Set claim date if address receives for first time.
         if (_nextAvailableClaimDate[recipient] == 0) {
             _nextAvailableClaimDate[recipient] = block.timestamp + getRewardCycleBlock();
         }
-            
+        
+        //Correct fees for after the transaction.
         if (!takeFee) {
             restoreAllFee();
         } else if (_buyTx) {
@@ -809,12 +824,12 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
         
         //Set amount for sender and manage staked amounts.
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
-        //Check for excluded accounts
+        //Address is not excluded from rewards so stakes are decreased.
         withdrawHold(sender, tAmount);
         
         //Set amount for recipient and manage staked amounts.
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        //Check for excluded accounts
+        //Address is not excluded from rewards so he receives a stake.
         hold(recipient, tTransferAmount);
         
         //Refund the liquidity and reward fees to the contract.
@@ -838,7 +853,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
             
         //Set amount for sender.
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
-        //Check for excluded accounts
+        //Address is not excluded from rewards so stakes are decreased.
         withdrawHold(sender, tAmount);
         
         //Set amount for recipient.
@@ -870,7 +885,7 @@ contract Draconite is Context, IERC20, Ownable, Holdable, ReentrancyGuard {
 
         //Set amount for recipient.
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        //Check for excluded accounts
+        //Address is not excluded from rewards so he receives a stake.
         hold(recipient, rTransferAmount);
         
         //Refund the liquidity and reward fees to the contract.
