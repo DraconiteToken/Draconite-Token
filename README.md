@@ -1,1 +1,1 @@
-# Draconite-Token
+Draconite Token is community driven token. Earn BNB rewards with our automated staking feature, regular BUSD prize pool for 3 very lucky winners every 1 week, reflection for users on sell transactions and steady price increase with liquidity build up on every transfer. Upcoming NFTs and NFT Web Based Game projects! For detailed information view our documentation: https://docs.draconite.org/
